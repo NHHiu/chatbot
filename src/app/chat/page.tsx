@@ -1,230 +1,196 @@
 'use client';
 
-import { useState } from 'react';
-import { 
-  Box, 
-  Container, 
-  TextField, 
-  IconButton, 
-  Paper, 
-  Typography,
-  AppBar,
-  Toolbar,
-  Skeleton,
-  Drawer,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Divider,
-  IconButton as MuiIconButton
-} from '@mui/material';
-import SendIcon from '@mui/icons-material/Send';
-import MenuIcon from '@mui/icons-material/Menu';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import SettingsIcon from '@mui/icons-material/Settings';
+import { useState, useEffect } from 'react';
+import { Container, Box } from '@mui/material';
+import UserMessageComponent from '../components/UserMessage';
+import BotMessageComponent from '../components/BotMessage';
+import ChatInput from '../components/ChatInput';
+import { EditOutlined, KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
 
-const DRAWER_WIDTH = 280;
+// New interfaces for grouped messages
+interface UserMessageVersion {
+  content: string;
+}
+
+interface UserMessageData {
+  id: string;
+  role: 'user';
+  versions: UserMessageVersion[];
+  currentVersionIndex: number;
+}
+
+interface BotResponseData {
+  userVersionIndex: number; // Index of the user message version this bot response is for
+  content: string;
+}
+
+interface ChatEntry {
+  id: string; // Unique ID for this conversation entry
+  userMessage: UserMessageData;
+  botResponses: BotResponseData[];
+  currentBotResponseIndex: number; // Index into botResponses array to display
+  isBotResponding: boolean; // Indicates if bot is currently generating a response for this entry
+}
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Global loading for input field
+
+  const simulateBotResponse = (chatEntryId: string, userVersionContent: string, userVersionIndex: number) => {
+    setTimeout(() => {
+      setChatHistory(prevChatHistory => {
+        const updatedChatHistory = prevChatHistory.map(entry => {
+          if (entry.id === chatEntryId) {
+            const newBotResponse: BotResponseData = {
+              userVersionIndex: userVersionIndex,
+              content: `Đây là phản hồi mẫu từ chatbot cho phiên bản ${userVersionIndex + 1}: "${userVersionContent}".`,
+            };
+            return {
+              ...entry,
+              botResponses: [...entry.botResponses, newBotResponse],
+              currentBotResponseIndex: entry.botResponses.length, // Point to the new response
+              isBotResponding: false, // Bot finished responding
+            };
+          } else {  
+            return entry;
+          }
+        });
+        return updatedChatHistory;
+      });
+    setIsLoading(false); // Global loading: Enable input after a bot response
+    }, 2000);
+  };
+
+  useEffect(() => {
+    console.log('chatHistory', chatHistory);
+  }, [chatHistory]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
 
-    // Add user message
-    const newMessages = [...messages, { role: 'user' as const, content: input }];
-    setMessages(newMessages);
-    setInput('');
-    setIsLoading(true);
+    const newChatEntryId = Date.now().toString();
+    const newUserMessage: UserMessageData = {
+      id: Date.now().toString(),
+      role: 'user',
+      versions: [{ content: input }],
+      currentVersionIndex: 0,
+    };
 
-    // TODO: Add API call to your backend here
-    // For now, we'll just simulate a response
-    setTimeout(() => {
-      setMessages([...newMessages, { 
-        role: 'assistant' as const, 
-        content: 'Đây là phản hồi mẫu từ chatbot. Bạn cần tích hợp API thực tế vào đây.' 
-      }]);
-      setIsLoading(false);
-    }, 2000);
+    const newChatEntry: ChatEntry = {
+      id: newChatEntryId,
+      userMessage: newUserMessage,
+      botResponses: [],
+      currentBotResponseIndex: -1,
+      isBotResponding: true, // Bot will respond to this new message
+    };
+
+    setChatHistory(prevChatHistory => [...prevChatHistory, newChatEntry]);
+    setInput('');
+    setIsLoading(true); // Disable input while bot is thinking
+    simulateBotResponse(newChatEntryId, input, newUserMessage.currentVersionIndex);
+  };
+
+  const handleUserMessageUpdate = (chatEntryIndex: number, newContent: string) => {
+    const chatEntryToUpdateId = chatHistory[chatHistory.length > 0 ? chatEntryIndex : 0].id; // Ensure chatEntryIndex is valid
+    const latestUserVersionIndex = chatHistory[chatEntryIndex].userMessage.versions.length; // This will be the new index
+
+    setChatHistory(prevChatHistory => {
+      return prevChatHistory.map((entry, index) => {
+        if (index === chatEntryIndex) {
+          const updatedVersions = [...entry.userMessage.versions, { content: newContent }];
+          const updatedUserMessage: UserMessageData = {
+            ...entry.userMessage,
+            versions: updatedVersions,
+            currentVersionIndex: updatedVersions.length - 1,
+          };
+          return {
+            ...entry,
+            userMessage: updatedUserMessage,
+            // botResponses: [], // Clear old bot responses for this entry
+            currentBotResponseIndex: -1, // No bot response for now
+            isBotResponding: true, // Start loading for this entry
+          };
+        }
+        return entry;
+      });
+    });
+    setIsLoading(true); // Disable input while bot is thinking
+    simulateBotResponse(chatEntryToUpdateId, newContent, latestUserVersionIndex);
+  };
+
+  const handleUserVersionChange = (chatEntryIndex: number, newVersionIndex: number) => {
+    setChatHistory(prevChatHistory => {
+      return prevChatHistory.map((entry, index) => {
+        if (index === chatEntryIndex) {
+          const correspondingBotResponseIndex = entry.botResponses.findIndex(
+            res => res.userVersionIndex === newVersionIndex
+          );
+          console.log('correspondingBotResponseIndex', entry.botResponses);
+          return {
+            ...entry,
+            userMessage: {
+              ...entry.userMessage,
+              currentVersionIndex: newVersionIndex,
+            },
+            currentBotResponseIndex: correspondingBotResponseIndex !== -1 ? correspondingBotResponseIndex : entry.currentBotResponseIndex,
+            isBotResponding: false, // Ensure loading is off when changing versions
+          };
+        }
+        return entry;
+      });
+    });
   };
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex' }}>
-      {/* Drawer */}
-      <Drawer
-        variant="temporary"
-        open={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        ModalProps={{
-          keepMounted: true, // Better open performance on mobile.
-        }}
-        sx={{
-          '& .MuiDrawer-paper': { 
-            boxSizing: 'border-box', 
-            width: DRAWER_WIDTH,
-            backgroundColor: 'background.paper',
-          },
+    <>
+      {/* Chat container */}
+      <Container 
+        maxWidth="md" 
+        sx={{ 
+          flex: 1, 
+          overflowY: 'auto', 
+          py: 2,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2
         }}
       >
-        <Toolbar>
-          <Typography variant="h6" noWrap component="div">
-            Chat History
-          </Typography>
-        </Toolbar>
-        <Divider />
-        <List>
-          <ListItem disablePadding>
-            <ListItemButton>
-              <ListItemIcon>
-                <AddIcon />
-              </ListItemIcon>
-              <ListItemText primary="New Chat" />
-            </ListItemButton>
-          </ListItem>
-          <ListItem disablePadding>
-            <ListItemButton>
-              <ListItemIcon>
-                <DeleteIcon />
-              </ListItemIcon>
-              <ListItemText primary="Clear History" />
-            </ListItemButton>
-          </ListItem>
-        </List>
-        <Divider />
-        <List>
-          <ListItem disablePadding>
-            <ListItemButton>
-              <ListItemIcon>
-                <SettingsIcon />
-              </ListItemIcon>
-              <ListItemText primary="Settings" />
-            </ListItemButton>
-          </ListItem>
-        </List>
-      </Drawer>
-
-      {/* Main content */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <AppBar position="static">
-          <Toolbar>
-            <MuiIconButton
-              color="inherit"
-              edge="start"
-              onClick={() => setIsDrawerOpen(true)}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </MuiIconButton>
-            <Typography variant="h6">
-              ChatBot
-            </Typography>
-          </Toolbar>
-        </AppBar>
-
-        {/* Chat container */}
-        <Container 
-          maxWidth="md" 
-          sx={{ 
-            flex: 1, 
-            overflowY: 'auto', 
-            py: 2,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2
-          }}
-        >
-          {messages.map((message, index) => (
-            <Box
-              key={index}
-              sx={{
-                display: 'flex',
-                justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
-              }}
-            >
-              <Paper
-                elevation={1}
-                sx={{
-                  p: 2,
-                  maxWidth: '70%',
-                  backgroundColor: message.role === 'user' ? 'primary.main' : 'grey.100',
-                  color: message.role === 'user' ? 'white' : 'text.primary',
-                }}
-              >
-                <Typography>{message.content}</Typography>
-              </Paper>
-            </Box>
-          ))}
-          {isLoading && (
-            <Box
-              sx={{
-                display: 'flex',
-                justifyContent: 'flex-start',
-              }}
-            >
-              <Paper
-                elevation={1}
-                sx={{
-                  p: 2,
-                  maxWidth: '70%',
-                  backgroundColor: 'grey.100',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 1,
-                }}
-              >
-                <Skeleton variant="text" width={200} height={20} />
-                <Skeleton variant="text" width={250} height={20} />
-                <Skeleton variant="text" width={180} height={20} />
-              </Paper>
-            </Box>
-          )}
-        </Container>
-
-        {/* Input form */}
-        <Paper 
-          component="form" 
-          onSubmit={handleSubmit}
-          sx={{ 
-            p: 2, 
-            backgroundColor: 'background.paper',
-            borderTop: 1,
-            borderColor: 'divider'
-          }}
-        >
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField
-              fullWidth
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Nhập tin nhắn của bạn..."
-              variant="outlined"
-              size="small"
-              disabled={isLoading}
+        {chatHistory.map((entry, chatEntryIndex) => (
+          <Box key={entry.id}>
+            <UserMessageComponent 
+              messageIndex={chatEntryIndex}
+              versions={entry.userMessage.versions.map(v => v.content)} 
+              onUpdate={handleUserMessageUpdate}
+              onVersionChange={handleUserVersionChange}
+              currentVersionIndex={entry.userMessage.currentVersionIndex}
             />
-            <IconButton 
-              type="submit" 
-              color="primary" 
-              sx={{ 
-                backgroundColor: 'primary.main',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'primary.dark',
-                }
-              }}
-              disabled={isLoading}
-            >
-              <SendIcon />
-            </IconButton>
+            {entry.isBotResponding ? (
+              <BotMessageComponent content="" isLoading={true} />
+            ) : (
+              entry.currentBotResponseIndex !== -1 && (
+                <BotMessageComponent 
+                  content={entry.botResponses[entry.currentBotResponseIndex]?.content || ''}
+                  isLoading={false}
+                />
+              )
+            )}
           </Box>
-        </Paper>
-      </Box>
-    </Box>
+        ))}
+        {/* Global isLoading for input field (e.g., when sending initial message) */}
+        {/* {isLoading && chatHistory.length > 0 && chatHistory[chatHistory.length - 1].isBotResponding && (
+          <BotMessageComponent content="" isLoading={true} />
+        )} */}
+      </Container>
+
+      {/* Input form */}
+      <ChatInput
+        input={input}
+        isLoading={isLoading}
+        onInputChange={setInput}
+        onSubmit={handleSubmit}
+      />
+    </>
   );
 } 
